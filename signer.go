@@ -13,14 +13,14 @@ import (
 type job func(in, out chan interface{})
 
 func main() {
-	inputData := []int{0, 1}
+	inputData := []int{0, 1, 2, 3, 4, 5, 6}
 	hashSignJobs := []job{
 		job(func(in, out chan interface{}) {
 			for _, fibNum := range inputData {
 				out <- fibNum
 			}
 		}),
-		job(SingleHash),
+		//job(SingleHash),
 		//job(MultiHash),
 		//job(CombineResults),
 	}
@@ -30,22 +30,25 @@ func main() {
 func ExecutePipeline(jobs ...job) {
 	wg := &sync.WaitGroup{}
 	in := make(chan interface{}, 1)
-	quotaCh := make(chan struct{}, 2)
+	out := make(chan interface{}, 100)
+	//mutex := &sync.Mutex{}
 	for _, job := range jobs {
-		out := make(chan interface{}, 1)
-		wg.Add(2)
+		wg.Add(1)
 		go jobWorker(job, in, out, wg)
-		in = out
-		go SingleHashWorker(in, out, wg, quotaCh)
+	}
+
+	for q := range out {
+		fmt.Println(q)
 	}
 	wg.Wait()
 	defer close(in)
-	defer close(quotaCh)
 }
 
 func jobWorker(job job, in, out chan interface{}, wg *sync.WaitGroup) {
 	job(in, out)
+	defer close(out)
 	defer wg.Done()
+	fmt.Println("end")
 }
 
 func SingleHashWorker(in, out chan interface{}, wg *sync.WaitGroup, quotaCh chan struct{}) {
@@ -65,7 +68,7 @@ var SingleHash = func(in, out chan interface{}) {
 		crc32Data := DataSignerCrc32(strconv.Itoa(dataStr))
 		result := crc32Data + "~" + crc32DataWithMd5
 
-		out <- result // Результат перезаписывается в int в цикле, из-за этого случается deadlock
+		//out <- result // Результат перезаписывается в int в цикле, из-за этого случается deadlock
 
 		fmt.Printf("%v SingleHash data %v\n", dataStr, dataStr)
 		fmt.Printf("%v SingleHash md5(data) %v\n", dataStr, md5Data)
@@ -89,6 +92,8 @@ func multiHash(data string) {
 	}
 	fmt.Printf("%v MultiHash: result: %v\n", data, txt)
 }
+
+//----------------
 
 const (
 	MaxInputDataLen = 100
