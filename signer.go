@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"fmt"
 	"hash/crc32"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -13,7 +14,7 @@ import (
 type job func(in, out chan interface{})
 
 func main() {
-	inputData := []int{0, 1, 2, 3, 4, 5, 6}
+	inputData := []int{0, 1, 2, 3, 4, 5}
 	hashSignJobs := []job{
 		job(func(in, out chan interface{}) {
 			for _, fibNum := range inputData {
@@ -28,58 +29,44 @@ func main() {
 }
 
 func ExecutePipeline(jobs ...job) {
+	runtime.GOMAXPROCS(0)
 	wg := &sync.WaitGroup{}
 	in := make(chan interface{}, 1)
 	out := make(chan interface{}, 100)
-	//mutex := &sync.Mutex{}
 	for _, job := range jobs {
 		wg.Add(1)
 		go jobWorker(job, in, out, wg)
+		in = out
 	}
-
-	for q := range out {
-		fmt.Println(q)
-	}
+	go SingleHash(in, out)
+	time.Sleep(time.Millisecond * 20)
+	close(in)
 	wg.Wait()
-	defer close(in)
+	//defer close(out)
 }
 
 func jobWorker(job job, in, out chan interface{}, wg *sync.WaitGroup) {
 	job(in, out)
-	defer close(out)
-	defer wg.Done()
 	fmt.Println("end")
-}
-
-func SingleHashWorker(in, out chan interface{}, wg *sync.WaitGroup, quotaCh chan struct{}) {
-	for _ = range in {
-		quotaCh <- struct{}{}
-		SingleHash(in, out)
-		<-quotaCh
-	}
 	defer wg.Done()
 }
 
 var SingleHash = func(in, out chan interface{}) {
 	for item := range in {
 		dataStr := item.(int)
-		md5Data := DataSignerMd5(strconv.Itoa(dataStr))
-		crc32DataWithMd5 := DataSignerCrc32(md5Data)
-		crc32Data := DataSignerCrc32(strconv.Itoa(dataStr))
-		result := crc32Data + "~" + crc32DataWithMd5
-
-		//out <- result // Результат перезаписывается в int в цикле, из-за этого случается deadlock
-
 		fmt.Printf("%v SingleHash data %v\n", dataStr, dataStr)
+		md5Data := DataSignerMd5(strconv.Itoa(dataStr))
 		fmt.Printf("%v SingleHash md5(data) %v\n", dataStr, md5Data)
+		crc32DataWithMd5 := DataSignerCrc32(md5Data)
 		fmt.Printf("%v SingleHash crc32(md5(data)) %v\n", dataStr, crc32DataWithMd5)
+		crc32Data := DataSignerCrc32(strconv.Itoa(dataStr))
 		fmt.Printf("%v SingleHash crc32(data) %v\n", dataStr, crc32Data)
+		result := crc32Data + "~" + crc32DataWithMd5
 		fmt.Printf("%v SingleHash result %v\n", dataStr, result)
 	}
-	//defer close(in)
 }
 
-func multiHash(data string) {
+func MultiHash(data string) {
 	th := []int{0, 1, 2, 3, 4, 5}
 	valueMap := make(map[int]string)
 	txt := ""
@@ -93,7 +80,7 @@ func multiHash(data string) {
 	fmt.Printf("%v MultiHash: result: %v\n", data, txt)
 }
 
-//----------------
+//Not need change!
 
 const (
 	MaxInputDataLen = 100
