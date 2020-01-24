@@ -34,12 +34,12 @@ func ExecutePipeline(jobs ...job) {
 	in := make(chan interface{}, 1)
 	out := make(chan interface{}, 100)
 	for _, job := range jobs {
-		wg.Add(1)
+		wg.Add(2)
 		go jobWorker(job, in, out, wg)
 		in = out
+		go SingleHashWorker(in, out, wg)
 	}
-	go SingleHash(in, out)
-	time.Sleep(time.Millisecond * 20)
+	time.Sleep(time.Microsecond * 10)
 	close(in)
 	wg.Wait()
 	//defer close(out)
@@ -48,6 +48,11 @@ func ExecutePipeline(jobs ...job) {
 func jobWorker(job job, in, out chan interface{}, wg *sync.WaitGroup) {
 	job(in, out)
 	fmt.Println("end")
+	defer wg.Done()
+}
+
+func SingleHashWorker(in, out chan interface{}, wg *sync.WaitGroup) {
+	SingleHash(in, out)
 	defer wg.Done()
 }
 
