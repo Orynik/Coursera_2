@@ -14,14 +14,14 @@ import (
 type job func(in, out chan interface{})
 
 func main() {
-	inputData := []int{0, 1, 2, 3, 4, 5}
+	inputData := []int{0, 1}
 	hashSignJobs := []job{
 		job(func(in, out chan interface{}) {
 			for _, fibNum := range inputData {
 				out <- fibNum
 			}
 		}),
-		//job(SingleHash),
+		job(SingleHash),
 		//job(MultiHash),
 		//job(CombineResults),
 	}
@@ -31,61 +31,67 @@ func main() {
 func ExecutePipeline(jobs ...job) {
 	runtime.GOMAXPROCS(0)
 	wg := &sync.WaitGroup{}
-	in := make(chan interface{}, 1)
+	in := make(chan interface{}, 100)
 	out := make(chan interface{}, 100)
 	for _, job := range jobs {
-		wg.Add(2)
+		wg.Add(1)
 		go jobWorker(job, in, out, wg)
-		in = out
-		go SingleHashWorker(in, out, wg)
 	}
-	time.Sleep(time.Microsecond * 10)
-	close(in)
 	wg.Wait()
-	//defer close(out)
+	defer close(in)
+	defer close(out)
 }
 
 func jobWorker(job job, in, out chan interface{}, wg *sync.WaitGroup) {
 	job(in, out)
-	fmt.Println("end")
-	defer wg.Done()
-}
-
-func SingleHashWorker(in, out chan interface{}, wg *sync.WaitGroup) {
-	SingleHash(in, out)
 	defer wg.Done()
 }
 
 var SingleHash = func(in, out chan interface{}) {
-	for item := range in {
-		dataStr := item.(int)
-		fmt.Printf("%v SingleHash data %v\n", dataStr, dataStr)
-		md5Data := DataSignerMd5(strconv.Itoa(dataStr))
-		fmt.Printf("%v SingleHash md5(data) %v\n", dataStr, md5Data)
-		crc32DataWithMd5 := DataSignerCrc32(md5Data)
-		fmt.Printf("%v SingleHash crc32(md5(data)) %v\n", dataStr, crc32DataWithMd5)
-		crc32Data := DataSignerCrc32(strconv.Itoa(dataStr))
-		fmt.Printf("%v SingleHash crc32(data) %v\n", dataStr, crc32Data)
-		result := crc32Data + "~" + crc32DataWithMd5
-		fmt.Printf("%v SingleHash result %v\n", dataStr, result)
+	// mutex := &sync.Mutex{}
+	time.Sleep(time.Microsecond * 8)
+LOOP:
+	for {
+		//len := len(out)
+		select {
+		case item := <-out:
+			dataStr := item.(int)
+			md5Data := DataSignerMd5(strconv.Itoa(dataStr))
+			crc32DataWithMd5 := DataSignerCrc32(md5Data)
+			crc32Data := DataSignerCrc32(strconv.Itoa(dataStr))
+			result := crc32Data + "~" + crc32DataWithMd5
+			// mutex.Lock()
+			// in <- result
+			// mutex.Unlock()
+			fmt.Printf("%v SingleHash data %v\n", dataStr, dataStr)
+			fmt.Printf("%v SingleHash md5(data) %v\n", dataStr, md5Data)
+			fmt.Printf("%v SingleHash crc32(md5(data)) %v\n", dataStr, crc32DataWithMd5)
+			fmt.Printf("%v SingleHash crc32(data) %v\n", dataStr, crc32Data)
+			fmt.Printf("%v SingleHash result %v\n", dataStr, result)
+		default:
+			break LOOP
+		}
 	}
 }
 
-func MultiHash(data string) {
-	th := []int{0, 1, 2, 3, 4, 5}
-	valueMap := make(map[int]string)
+func MultiHash(in, out chan interface{}) {
 	txt := ""
+	data := <-in
+	th := []int{0, 1, 2, 3, 4, 5}
 	for i := 0; i < len(th); i++ {
-		buf := strconv.Itoa(th[i]) + data
+		buf := strconv.Itoa(th[i]) + data.(string)
 		bufCrc32 := DataSignerCrc32(buf)
-		fmt.Printf("%v MultiHash: crc32(%v) %v %v\n", data, buf, th[i], bufCrc32)
-		valueMap[i] = bufCrc32
+		output += data.(string) + " MultiHash: crc32(" + buf + ") " + string(th[i]) + " " + bufCrc32 + "\n"
 		txt += bufCrc32
 	}
-	fmt.Printf("%v MultiHash: result: %v\n", data, txt)
+	output += data.(string) + " MultiHash: result: " + txt + "\n"
+	fmt.Println(output)
+	//defer close(in)
+	//defer wg.Done()
+	out <- txt
 }
 
-//Not need change!
+//Not need change!----------------------------------------------------------------
 
 const (
 	MaxInputDataLen = 100
