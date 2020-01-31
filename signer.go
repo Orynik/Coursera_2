@@ -4,7 +4,6 @@ import (
 	"crypto/md5"
 	"fmt"
 	"hash/crc32"
-	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -12,6 +11,8 @@ import (
 )
 
 type job func(in, out chan interface{})
+
+var quotaCH = make(chan struct{}, 1)
 
 func main() {
 	inputData := []int{0, 1}
@@ -22,14 +23,13 @@ func main() {
 			}
 		}),
 		job(SingleHash),
-		//job(MultiHash),
+		job(MultiHash),
 		//job(CombineResults),
 	}
 	ExecutePipeline(hashSignJobs...)
 }
 
 func ExecutePipeline(jobs ...job) {
-	runtime.GOMAXPROCS(0)
 	wg := &sync.WaitGroup{}
 	in := make(chan interface{}, 100)
 	out := make(chan interface{}, 100)
@@ -38,8 +38,9 @@ func ExecutePipeline(jobs ...job) {
 		go jobWorker(job, in, out, wg)
 	}
 	wg.Wait()
-	defer close(in)
-	defer close(out)
+	//close(in)
+	close(out)
+
 }
 
 func jobWorker(job job, in, out chan interface{}, wg *sync.WaitGroup) {
@@ -48,8 +49,7 @@ func jobWorker(job job, in, out chan interface{}, wg *sync.WaitGroup) {
 }
 
 var SingleHash = func(in, out chan interface{}) {
-	// mutex := &sync.Mutex{}
-	time.Sleep(time.Microsecond * 8)
+	mutex := &sync.Mutex{}
 LOOP:
 	for {
 		//len := len(out)
@@ -60,35 +60,66 @@ LOOP:
 			crc32DataWithMd5 := DataSignerCrc32(md5Data)
 			crc32Data := DataSignerCrc32(strconv.Itoa(dataStr))
 			result := crc32Data + "~" + crc32DataWithMd5
-			// mutex.Lock()
-			// in <- result
-			// mutex.Unlock()
+
+			quotaCH <- struct{}{}
 			fmt.Printf("%v SingleHash data %v\n", dataStr, dataStr)
 			fmt.Printf("%v SingleHash md5(data) %v\n", dataStr, md5Data)
 			fmt.Printf("%v SingleHash crc32(md5(data)) %v\n", dataStr, crc32DataWithMd5)
+
 			fmt.Printf("%v SingleHash crc32(data) %v\n", dataStr, crc32Data)
 			fmt.Printf("%v SingleHash result %v\n", dataStr, result)
+
+			mutex.Lock()
+			in <- result
+			mutex.Unlock()
+			//time.Sleep(time.Second * 1)
+			<-quotaCH
 		default:
+			close(in)
 			break LOOP
 		}
 	}
 }
 
 func MultiHash(in, out chan interface{}) {
+	// txt := ""
+	// output := ""
+	// data := <-in
+	// th := []int{0, 1, 2, 3, 4, 5}
+	// for i := 0; i < len(th); i++ {
+	// 	buf := strconv.Itoa(th[i]) + data.(string)
+	// 	bufCrc32 := DataSignerCrc32(buf)
+	// 	output += data.(string) + " MultiHash: crc32(" + buf + ") " + string(th[i]) + " " + bufCrc32 + "\n"
+	// 	txt += bufCrc32
+	// }
+	// output += data.(string) + " MultiHash: result: " + txt + "\n"
+	// fmt.Println(output)
+	// defer close(in)
+	// defer wg.Done()
+	// out <- txt
+
+	//output := ""
+
 	txt := ""
-	data := <-in
-	th := []int{0, 1, 2, 3, 4, 5}
-	for i := 0; i < len(th); i++ {
-		buf := strconv.Itoa(th[i]) + data.(string)
-		bufCrc32 := DataSignerCrc32(buf)
-		output += data.(string) + " MultiHash: crc32(" + buf + ") " + string(th[i]) + " " + bufCrc32 + "\n"
-		txt += bufCrc32
+LOOP:
+	for {
+		data := <-in
+		if data == nil {
+			break LOOP
+		}
+		quotaCH <- struct{}{}
+		th := []int{0, 1, 2, 3, 4, 5}
+		for i := 0; i < len(th); i++ {
+			buf := strconv.Itoa(th[i]) + data.(string)
+			bufCrc32 := DataSignerCrc32(buf)
+			fmt.Print(data.(string) + " MultiHash: crc32(" + buf + ") " + string(th[i]) + " " + bufCrc32 + "\n")
+			txt += bufCrc32
+		}
+		<-quotaCH
+		// if len(in) == 0 {
+		// 	break LOOP
+		// }
 	}
-	output += data.(string) + " MultiHash: result: " + txt + "\n"
-	fmt.Println(output)
-	//defer close(in)
-	//defer wg.Done()
-	out <- txt
 }
 
 //Not need change!----------------------------------------------------------------
