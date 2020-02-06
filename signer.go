@@ -13,6 +13,8 @@ import (
 type job func(in, out chan interface{})
 
 var quotaCH = make(chan struct{}, 1)
+var mapa map[int]string
+var i = 0
 
 func main() {
 	inputData := []int{0, 1}
@@ -55,20 +57,27 @@ LOOP:
 		//len := len(out)
 		select {
 		case item := <-out:
-			dataStr := item.(int)
-			md5Data := DataSignerMd5(strconv.Itoa(dataStr))
+			dataInt := item.(int)
+			dataStr := string(dataInt)
+			md5Data := DataSignerMd5(strconv.Itoa(dataInt))
 			crc32DataWithMd5 := DataSignerCrc32(md5Data)
-			crc32Data := DataSignerCrc32(strconv.Itoa(dataStr))
+			crc32Data := DataSignerCrc32(strconv.Itoa(dataInt))
 			result := crc32Data + "~" + crc32DataWithMd5
 
 			quotaCH <- struct{}{}
-			fmt.Printf("%v SingleHash data %v\n", dataStr, dataStr)
-			fmt.Printf("%v SingleHash md5(data) %v\n", dataStr, md5Data)
-			fmt.Printf("%v SingleHash crc32(md5(data)) %v\n", dataStr, crc32DataWithMd5)
+			// fmt.Printf("%v SingleHash data %v\n", dataStr, dataStr)
+			// fmt.Printf("%v SingleHash md5(data) %v\n", dataStr, md5Data)
+			// fmt.Printf("%v SingleHash crc32(md5(data)) %v\n", dataStr, crc32DataWithMd5)
 
-			fmt.Printf("%v SingleHash crc32(data) %v\n", dataStr, crc32Data)
-			fmt.Printf("%v SingleHash result %v\n", dataStr, result)
+			// fmt.Printf("%v SingleHash crc32(data) %v\n", dataStr, crc32Data)
+			// fmt.Printf("%v SingleHash result %v\n", dataStr, result)
 
+			mapa[i] = dataStr + " SingleHash data " + dataStr + "\n" +
+				dataStr + " SingleHash md5(data) " + dataStr + "  " + md5Data + "\n" +
+				dataStr + " SingleHash crc32(md5(data)) " + crc32DataWithMd5 + "\n" +
+				dataStr + " SingleHash crc32(data) " + crc32Data + "\n" +
+				dataStr + " SingleHash result " + result + "\n"
+			i++
 			mutex.Lock()
 			in <- result
 			mutex.Unlock()
