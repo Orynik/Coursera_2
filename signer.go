@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"runtime"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -13,16 +14,19 @@ import (
 
 type job func(in, out chan interface{})
 
+var debug map[int32]string = map[int32]string{}
+var idx int32 = 0
+
 func main() {
-	inputData := []int{0, 1, 2, 3, 4, 5}
+	inputData := []int{0, 1}
 	hashSignJobs := []job{
 		job(func(in, out chan interface{}) {
 			for _, fibNum := range inputData {
 				out <- fibNum
 			}
 		}),
-		//job(SingleHash),
-		//job(MultiHash),
+		job(SingleHash),
+		job(MultiHash),
 		//job(CombineResults),
 	}
 	ExecutePipeline(hashSignJobs...)
@@ -31,58 +35,91 @@ func main() {
 func ExecutePipeline(jobs ...job) {
 	runtime.GOMAXPROCS(0)
 	wg := &sync.WaitGroup{}
-	in := make(chan interface{}, 1)
+	in := make(chan interface{}, 100)
 	out := make(chan interface{}, 100)
 	for _, job := range jobs {
-		wg.Add(2)
+		wg.Add(1)
 		go jobWorker(job, in, out, wg)
 		in = out
-		go SingleHashWorker(in, out, wg)
+		out = make(chan interface{}, 100)
 	}
-	time.Sleep(time.Microsecond * 10)
-	close(in)
 	wg.Wait()
-	//defer close(out)
+	qw := make([]string, 20, 20)
+	for _, item := range debug {
+		qw = append(qw, item)
+	}
+
+	sort.Strings(qw)
+
+	for _, item := range qw {
+		fmt.Print(item)
+	}
 }
 
 func jobWorker(job job, in, out chan interface{}, wg *sync.WaitGroup) {
+	defer wg.Done()
+	defer close(out)
 	job(in, out)
-	fmt.Println("end")
-	defer wg.Done()
-}
-
-func SingleHashWorker(in, out chan interface{}, wg *sync.WaitGroup) {
-	SingleHash(in, out)
-	defer wg.Done()
 }
 
 var SingleHash = func(in, out chan interface{}) {
-	for item := range in {
-		dataStr := item.(int)
-		fmt.Printf("%v SingleHash data %v\n", dataStr, dataStr)
-		md5Data := DataSignerMd5(strconv.Itoa(dataStr))
-		fmt.Printf("%v SingleHash md5(data) %v\n", dataStr, md5Data)
-		crc32DataWithMd5 := DataSignerCrc32(md5Data)
-		fmt.Printf("%v SingleHash crc32(md5(data)) %v\n", dataStr, crc32DataWithMd5)
-		crc32Data := DataSignerCrc32(strconv.Itoa(dataStr))
-		fmt.Printf("%v SingleHash crc32(data) %v\n", dataStr, crc32Data)
-		result := crc32Data + "~" + crc32DataWithMd5
-		fmt.Printf("%v SingleHash result %v\n", dataStr, result)
+	mu := &sync.Mutex{}
+	wg := &sync.WaitGroup{}
+
+	for input := range in {
+		wg.Add(1)
+		go func(input interface{}) {
+			defer wg.Done()
+			value, ok := input.(int)
+			if !ok {
+				fmt.Errorf("Can't convert interface to string")
+			}
+			dataStr := strconv.Itoa(value)
+			mu.Lock()
+			md5Data := DataSignerMd5(dataStr)
+			mu.Unlock()
+			crc32DataWithMd5 := DataSignerCrc32(md5Data)
+			crc32Data := DataSignerCrc32(dataStr)
+			result := crc32Data + "~" + crc32DataWithMd5
+			out <- result
+			mu.Lock()
+			debug[idx] = dataStr + " SingleHash data " + dataStr + "\n" +
+				dataStr + " SingleHash md5(data) " + dataStr + "  " + md5Data + "\n" +
+				dataStr + " SingleHash crc32(md5(data)) " + crc32DataWithMd5 + "\n" +
+				dataStr + " SingleHash crc32(data) " + crc32Data + "\n" +
+				dataStr + " SingleHash result " + result + "\n"
+			mu.Unlock()
+			atomic.AddInt32(&idx, 1)
+		}(input)
 	}
+	wg.Wait()
 }
 
-func MultiHash(data string) {
-	th := []int{0, 1, 2, 3, 4, 5}
-	valueMap := make(map[int]string)
+func MultiHash(in, out chan interface{}) {
+	mut := &sync.Mutex{}
+	wg := &sync.WaitGroup{}
 	txt := ""
-	for i := 0; i < len(th); i++ {
-		buf := strconv.Itoa(th[i]) + data
-		bufCrc32 := DataSignerCrc32(buf)
-		fmt.Printf("%v MultiHash: crc32(%v) %v %v\n", data, buf, th[i], bufCrc32)
-		valueMap[i] = bufCrc32
-		txt += bufCrc32
+	for item := range in {
+		wg.Add(1)
+		go func(item interface{}) {
+			defer wg.Done()
+			// value := item.(int)
+			data := item.(string)
+			th := []int{0, 1, 2, 3, 4, 5}
+			for i := 0; i < len(th); i++ {
+				buf := strconv.Itoa(th[i]) + data
+				bufCrc32 := DataSignerCrc32(buf)
+				mut.Lock()
+				txt += data + " MultiHash: crc32(" + buf + ") " + string(th[i]) + " " + bufCrc32 + "\n"
+				mut.Unlock()
+			}
+		}(item)
 	}
-	fmt.Printf("%v MultiHash: result: %v\n", data, txt)
+	mut.Lock()
+	debug[idx] = txt
+	mut.Unlock()
+	atomic.AddInt32(&idx, 1)
+	wg.Wait()
 }
 
 //Not need change!
