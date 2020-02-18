@@ -4,7 +4,6 @@ import (
 	"crypto/md5"
 	"fmt"
 	"hash/crc32"
-	"runtime"
 	"sort"
 	"strconv"
 	"sync"
@@ -14,11 +13,11 @@ import (
 
 type job func(in, out chan interface{})
 
-var debug map[int32]string = map[int32]string{}
+var debug map[string]string = map[string]string{}
 var idx int32 = 0
 
 func main() {
-	inputData := []int{0, 1}
+	inputData := []int{0, 1, 2, 3, 4}
 	hashSignJobs := []job{
 		job(func(in, out chan interface{}) {
 			for _, fibNum := range inputData {
@@ -33,7 +32,6 @@ func main() {
 }
 
 func ExecutePipeline(jobs ...job) {
-	runtime.GOMAXPROCS(0)
 	wg := &sync.WaitGroup{}
 	in := make(chan interface{}, 100)
 	out := make(chan interface{}, 100)
@@ -44,7 +42,7 @@ func ExecutePipeline(jobs ...job) {
 		out = make(chan interface{}, 100)
 	}
 	wg.Wait()
-	qw := make([]string, 20, 20)
+	qw := make([]string, len(debug), len(debug))
 	for _, item := range debug {
 		qw = append(qw, item)
 	}
@@ -70,10 +68,7 @@ var SingleHash = func(in, out chan interface{}) {
 		wg.Add(1)
 		go func(input interface{}) {
 			defer wg.Done()
-			value, ok := input.(int)
-			if !ok {
-				fmt.Errorf("Can't convert interface to string")
-			}
+			value := input.(int)
 			dataStr := strconv.Itoa(value)
 			mu.Lock()
 			md5Data := DataSignerMd5(dataStr)
@@ -83,13 +78,13 @@ var SingleHash = func(in, out chan interface{}) {
 			result := crc32Data + "~" + crc32DataWithMd5
 			out <- result
 			mu.Lock()
-			debug[idx] = dataStr + " SingleHash data " + dataStr + "\n" +
+			debug[result] = "\n" + dataStr + " SingleHash data " + dataStr + "\n" +
 				dataStr + " SingleHash md5(data) " + dataStr + "  " + md5Data + "\n" +
 				dataStr + " SingleHash crc32(md5(data)) " + crc32DataWithMd5 + "\n" +
 				dataStr + " SingleHash crc32(data) " + crc32Data + "\n" +
 				dataStr + " SingleHash result " + result + "\n"
 			mu.Unlock()
-			atomic.AddInt32(&idx, 1)
+			//			atomic.AddInt32(&idx, 1)
 		}(input)
 	}
 	wg.Wait()
@@ -98,7 +93,7 @@ var SingleHash = func(in, out chan interface{}) {
 func MultiHash(in, out chan interface{}) {
 	mut := &sync.Mutex{}
 	wg := &sync.WaitGroup{}
-	txt := ""
+	//txt := ""
 	for item := range in {
 		wg.Add(1)
 		go func(item interface{}) {
@@ -110,15 +105,12 @@ func MultiHash(in, out chan interface{}) {
 				buf := strconv.Itoa(th[i]) + data
 				bufCrc32 := DataSignerCrc32(buf)
 				mut.Lock()
-				txt += data + " MultiHash: crc32(" + buf + ") " + string(th[i]) + " " + bufCrc32 + "\n"
+				debug[data] += data + " MultiHash: crc32(" + buf + ") " + string(th[i]) + " " + bufCrc32 + "\n"
 				mut.Unlock()
+				//atomic.AddInt32(&idx, 1)
 			}
 		}(item)
 	}
-	mut.Lock()
-	debug[idx] = txt
-	mut.Unlock()
-	atomic.AddInt32(&idx, 1)
 	wg.Wait()
 }
 
