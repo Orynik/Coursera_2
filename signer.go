@@ -6,18 +6,21 @@ import (
 	"hash/crc32"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
+var mut = &sync.Mutex{}
+
 type job func(in, out chan interface{})
 
 var debug map[string]string = map[string]string{}
-var idx int32 = 0
+var result string = ""
 
 func main() {
-	inputData := []int{0, 1, 2, 3, 4}
+	inputData := []int{0, 1, 2, 3, 4, 5}
 	hashSignJobs := []job{
 		job(func(in, out chan interface{}) {
 			for _, fibNum := range inputData {
@@ -26,7 +29,7 @@ func main() {
 		}),
 		job(SingleHash),
 		job(MultiHash),
-		//job(CombineResults),
+		job(CombineResults),
 	}
 	ExecutePipeline(hashSignJobs...)
 }
@@ -52,6 +55,7 @@ func ExecutePipeline(jobs ...job) {
 	for _, item := range qw {
 		fmt.Print(item)
 	}
+	fmt.Println(result)
 }
 
 func jobWorker(job job, in, out chan interface{}, wg *sync.WaitGroup) {
@@ -77,26 +81,25 @@ var SingleHash = func(in, out chan interface{}) {
 			crc32Data := DataSignerCrc32(dataStr)
 			result := crc32Data + "~" + crc32DataWithMd5
 			out <- result
-			mu.Lock()
+			mut.Lock()
 			debug[result] = "\n" + dataStr + " SingleHash data " + dataStr + "\n" +
 				dataStr + " SingleHash md5(data) " + dataStr + "  " + md5Data + "\n" +
 				dataStr + " SingleHash crc32(md5(data)) " + crc32DataWithMd5 + "\n" +
 				dataStr + " SingleHash crc32(data) " + crc32Data + "\n" +
 				dataStr + " SingleHash result " + result + "\n"
-			mu.Unlock()
-			//			atomic.AddInt32(&idx, 1)
+			mut.Unlock()
 		}(input)
 	}
 	wg.Wait()
 }
 
 func MultiHash(in, out chan interface{}) {
-	mut := &sync.Mutex{}
+	mu := &sync.Mutex{}
 	wg := &sync.WaitGroup{}
-	//txt := ""
 	for item := range in {
 		wg.Add(1)
 		go func(item interface{}) {
+			txt := ""
 			defer wg.Done()
 			// value := item.(int)
 			data := item.(string)
@@ -105,13 +108,42 @@ func MultiHash(in, out chan interface{}) {
 				buf := strconv.Itoa(th[i]) + data
 				bufCrc32 := DataSignerCrc32(buf)
 				mut.Lock()
+				txt += bufCrc32
 				debug[data] += data + " MultiHash: crc32(" + buf + ") " + string(th[i]) + " " + bufCrc32 + "\n"
 				mut.Unlock()
 				//atomic.AddInt32(&idx, 1)
 			}
+			mu.Lock()
+			out <- txt
+			mu.Unlock()
+			mut.Lock()
+			debug[data] += data + " MultiHash result: " + txt + "\n"
+			mut.Unlock()
 		}(item)
 	}
 	wg.Wait()
+}
+
+func CombineResults(in, out chan interface{}) {
+	mu := &sync.Mutex{}
+	wg := &sync.WaitGroup{}
+	//txt := ""
+	i := 0
+	var slice []string
+	for item := range in {
+		wg.Add(1)
+		go func(item interface{}) {
+			defer wg.Done()
+			mu.Lock()
+			slice = append(slice, item.(string))
+			i++
+			mu.Unlock()
+		}(item)
+	}
+	wg.Wait()
+	sort.Strings(slice)
+	result = "\nCombineResults  " + strings.Join(slice, "_") + "\n"
+	out <- strings.Join(slice, "_")
 }
 
 //Not need change!
