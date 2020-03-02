@@ -28,8 +28,8 @@ func main() {
 			}
 		}),
 		job(SingleHash),
-		job(MultiHash),
-		job(CombineResults),
+		//job(MultiHash),
+		//job(CombineResults),
 	}
 	ExecutePipeline(hashSignJobs...)
 }
@@ -66,31 +66,49 @@ func jobWorker(job job, in, out chan interface{}, wg *sync.WaitGroup) {
 
 var SingleHash = func(in, out chan interface{}) {
 	mu := &sync.Mutex{}
-	wg := &sync.WaitGroup{}
+	wgSH := &sync.WaitGroup{}
 
 	for input := range in {
-		wg.Add(1)
+		wgSH.Add(1)
 		go func(input interface{}) {
-			defer wg.Done()
+			defer wgSH.Done()
 			value := input.(int)
 			dataStr := strconv.Itoa(value)
 			mu.Lock()
 			md5Data := DataSignerMd5(dataStr)
 			mu.Unlock()
-			crc32DataWithMd5 := DataSignerCrc32(md5Data)
-			crc32Data := DataSignerCrc32(dataStr)
-			result := crc32Data + "~" + crc32DataWithMd5
+
+			var crc32Hash (map[string]string) = map[string]string{
+				"data":    dataStr,
+				"md5Data": md5Data,
+			}
+			fmt.Println(crc32Hash["data"])
+			fmt.Println(crc32Hash["md5Data"])
+			wg := &sync.WaitGroup{}
+			//Разпаралеливание crc32 вычислений
+			for item := range crc32Hash {
+				wg.Add(1)
+				go func(item string) {
+					defer wg.Done()
+					crc32Data := DataSignerCrc32(crc32Hash[item])
+					mu.Lock()
+					crc32Hash[item] = crc32Data
+					mu.Unlock()
+				}(item)
+			}
+			wg.Wait()
+			result := crc32Hash["data"] + "~" + crc32Hash["md5Data"]
 			out <- result
 			mut.Lock()
 			debug[result] = "\n" + dataStr + " SingleHash data " + dataStr + "\n" +
 				dataStr + " SingleHash md5(data) " + dataStr + "  " + md5Data + "\n" +
-				dataStr + " SingleHash crc32(md5(data)) " + crc32DataWithMd5 + "\n" +
-				dataStr + " SingleHash crc32(data) " + crc32Data + "\n" +
+				dataStr + " SingleHash crc32(md5(data)) " + crc32Hash["md5Data"] + "\n" +
+				dataStr + " SingleHash crc32(data) " + crc32Hash["data"] + "\n" +
 				dataStr + " SingleHash result " + result + "\n"
 			mut.Unlock()
 		}(input)
 	}
-	wg.Wait()
+	wgSH.Wait()
 }
 
 func MultiHash(in, out chan interface{}) {
@@ -111,7 +129,7 @@ func MultiHash(in, out chan interface{}) {
 				txt += bufCrc32
 				debug[data] += data + " MultiHash: crc32(" + buf + ") " + string(th[i]) + " " + bufCrc32 + "\n"
 				mut.Unlock()
-				//atomic.AddInt32(&idx, 1)
+				// atomic.AddInt32(&idx, 1)
 			}
 			mu.Lock()
 			out <- txt
